@@ -9,7 +9,7 @@ import 'providers/language_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
-  final savedUrl = prefs.getString('server_url') ?? 'http://192.168.209.243:8000';
+  final savedUrl = prefs.getString('server_url') ?? 'https://lingua-voice.onrender.com';
   final nativeLang = prefs.getString('native_language') ?? 'en';
 
   runApp(

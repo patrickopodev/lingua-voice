@@ -3,9 +3,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+import os
+
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
+import httpx
 
 from providers import get_stt, get_llm, get_tts
 from providers.llm import parse_llm_response
@@ -33,32 +36,100 @@ class SpeakRequest(BaseModel):
     text: str
     language: str = "spanish"
 
-# ── Transcribe ──────────────────────────────────────────
+# ── Pronunciation Scoring ──────────────────────────────────
 
-@router.post("/translate_and_speak")
-async def translate_and_speak(
-    text: str = Form(...),
-    target_language: str = Form("en"),
+@router.post("/pronounce")
+async def pronounce(
+    audio: UploadFile = File(...),
+    reference_text: str = Form(...),
+    language: str = Form("en"),
 ):
     try:
+        audio_bytes = await audio.read()
+        api_key = os.getenv("SPEECHACE_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="SPEECHACE_API_KEY not set")
+
+        dialect_map = {
+            "en": "en-us", "es": "es-es", "fr": "fr-fr",
+            "de": "de-de", "it": "it-it", "pt": "pt-pt",
+            "ja": "ja-jp", "ko": "ko-kr", "zh": "zh-cn",
+            "ru": "ru-ru", "ar": "ar-sa", "hi": "hi-in",
+        }
+        dialect = dialect_map.get(language, "en-us")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.speechace.com/api/v1.3/scoring/text",
+                data={
+                    "key": api_key,
+                    "text": reference_text,
+                    "dialect": dialect,
+                },
+                files={"file": (audio.filename or "audio.wav", audio_bytes, audio.content_type or "audio/wav")},
+            )
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Speechace API error: {resp.status_code} {resp.text}")
+
+        data = resp.json()
+
+        score = data.get("score", {})
+        word_scores = score.get("word_score_list", [])
+        phoneme_scores = []
+        for ws in word_scores:
+            for ps in ws.get("phone_score_list", []):
+                phoneme_scores.append({
+                    "phoneme": ps.get("phone", ""),
+                    "score": ps.get("phone_score", 0),
+                    "is_mispronounced": (ps.get("phone_score", 100) or 100) < 60,
+                })
+
+        return {
+            "overall_score": score.get("score", 0),
+            "fluency": score.get("fluency", 0),
+            "word_scores": [
+                {
+                    "word": ws.get("word", ""),
+                    "score": ws.get("word_score", 0),
+                    "is_mispronounced": (ws.get("word_score", 100) or 100) < 60,
+                }
+                for ws in word_scores
+            ],
+            "phoneme_scores": phoneme_scores,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Transcribe ──────────────────────────────────────────
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_language: str = "en"
+
+@router.post("/translate_and_speak")
+async def translate_and_speak(req: TranslateRequest):
+    try:
         translation_prompt = (
-            f"Translate the following text to {target_language}. "
-            f"Return only the translation, no other text.\n\n{text}"
+            f"Translate the following text to {req.target_language}. "
+            f"Return only the translation, no other text.\n\n{req.text}"
         )
         translated_text = await llm.generate(
             translation_prompt,
-            target_language,
+            req.target_language,
             [{"role": "system", "content": "You are a translator. Return only the translation."}],
         )
         translated_text = translated_text.strip().strip('"\'')
-        audio_data = await tts.speak(translated_text, target_language)
+        audio_data = await tts.speak(translated_text, req.target_language)
         filename = f"{uuid.uuid4().hex}.mp3"
         filepath = AUDIO_CACHE / filename
         filepath.write_bytes(audio_data)
         return {
             "translated_text": translated_text,
             "audio_url": f"/audio/{filename}",
-            "target_language": target_language,
+            "target_language": req.target_language,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -77,9 +148,15 @@ async def chat(req: ChatRequest):
     response_text = parsed["response_text"]
     correction = parsed["correction"]
 
+    audio_data = await tts.speak(response_text, req.language)
+    filename = f"{uuid.uuid4().hex}.mp3"
+    filepath = AUDIO_CACHE / filename
+    filepath.write_bytes(audio_data)
+
     result = {
         "response": response_text,
         "correction": correction,
+        "audio_url": f"/audio/{filename}",
     }
 
     if req.user_id:
@@ -93,6 +170,7 @@ async def chat(req: ChatRequest):
         conversation_data = {
             "user_text": req.text,
             "response": response_text,
+            "audio_url": f"/audio/{filename}",
             "language": req.language,
         }
         save_conversation(req.user_id, conversation_data)
@@ -117,55 +195,58 @@ async def conversation(
     lesson_id: str = Form(None),
 ):
     try:
-        history_list = json.loads(history)
-    except json.JSONDecodeError:
-        history_list = []
+        try:
+            history_list = json.loads(history)
+        except json.JSONDecodeError:
+            history_list = []
 
-    text = await stt.transcribe(await audio.read(), language)
-    raw_response = await llm.generate(text, language, history_list)
-    parsed = parse_llm_response(raw_response)
-    response_text = parsed["response_text"]
-    correction = parsed["correction"]
+        text = await stt.transcribe(await audio.read(), language)
+        raw_response = await llm.generate(text, language, history_list)
+        parsed = parse_llm_response(raw_response)
+        response_text = parsed["response_text"]
+        correction = parsed["correction"]
 
-    audio_data = await tts.speak(response_text, language)
+        audio_data = await tts.speak(response_text, language)
 
-    filename = f"{uuid.uuid4().hex}.mp3"
-    filepath = AUDIO_CACHE / filename
-    filepath.write_bytes(audio_data)
+        filename = f"{uuid.uuid4().hex}.mp3"
+        filepath = AUDIO_CACHE / filename
+        filepath.write_bytes(audio_data)
 
-    xp_result = add_xp(user_id, 10)
+        xp_result = add_xp(user_id, 10)
 
-    if correction.get("vocab"):
-        for v in correction["vocab"][:5]:
-            add_vocabulary(user_id, v["word"], v.get("translation", ""), language)
+        if correction.get("vocab"):
+            for v in correction["vocab"][:5]:
+                add_vocabulary(user_id, v["word"], v.get("translation", ""), language)
 
-    conversation_data = {
-        "user_text": text,
-        "response": response_text,
-        "audio_url": f"/audio/{filename}",
-        "language": language,
-    }
-    save_conversation(user_id, conversation_data)
+        conversation_data = {
+            "user_text": text,
+            "response": response_text,
+            "audio_url": f"/audio/{filename}",
+            "language": language,
+        }
+        save_conversation(user_id, conversation_data)
 
-    result = {
-        "user_text": text,
-        "response": response_text,
-        "audio_url": f"/audio/{filename}",
-        "language": language,
-        "timestamp": datetime.utcnow().isoformat(),
-        "correction": correction,
-        "xp": xp_result,
-    }
+        result = {
+            "user_text": text,
+            "response": response_text,
+            "audio_url": f"/audio/{filename}",
+            "language": language,
+            "timestamp": datetime.utcnow().isoformat(),
+            "correction": correction,
+            "xp": xp_result,
+        }
 
-    if lesson_id:
-        lesson_result = complete_lesson(user_id, lesson_id)
-        xp_from_lesson = lesson_result.get("xp_earned", 0)
-        if xp_from_lesson > 0:
-            xp_result = add_xp(user_id, xp_from_lesson)
-            result["xp"] = xp_result
-            result["lesson_completed"] = True
+        if lesson_id:
+            lesson_result = complete_lesson(user_id, lesson_id)
+            xp_from_lesson = lesson_result.get("xp_earned", 0)
+            if xp_from_lesson > 0:
+                xp_result = add_xp(user_id, xp_from_lesson)
+                result["xp"] = xp_result
+                result["lesson_completed"] = True
 
-    return result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Conversation error: {type(e).__name__}: {e}")
 
 # ── User Profile & Stats ───────────────────────────────
 

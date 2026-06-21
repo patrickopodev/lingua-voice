@@ -1,0 +1,15 @@
+IINFO:     192.168.209.94:45830 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:45836 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:45834 - "GET /vocabulary/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:45832 - "GET /lessons HTTP/1.1" 200 OK
+INFO:     192.168.209.94:45838 - "POST /chat HTTP/1.1" 500 Internal Server Error
+INFO:     192.168.209.94:47238 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:47242 - "GET /vocabulary/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:47240 - "GET /lessons HTTP/1.1" 200 OK
+INFO:     192.168.209.94:47244 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:47262 - "POST /chat HTTP/1.1" 500 Internal Server Error
+INFO:     192.168.209.94:49030 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:49032 - "GET /lessons HTTP/1.1" 200 OK
+INFO:     192.168.209.94:49034 - "GET /vocabulary/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:49036 - "GET /stats/default HTTP/1.1" 200 OK
+INFO:     192.168.209.94:49040 - "POST /chat HTTP/1.1" 500 Internal Server Error

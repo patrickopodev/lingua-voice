@@ -141,4 +141,18 @@ class ApiService {
     final response = await _dio.get('/progress/$userId');
     return response.data;
   }
+
+  Future<Map<String, dynamic>> pronounce(File audioFile, String referenceText, String language) async {
+    try {
+      final formData = FormData.fromMap({
+        'audio': await MultipartFile.fromFile(audioFile.path),
+        'reference_text': referenceText,
+        'language': language,
+      });
+      final response = await _dio.post('/pronounce', data: formData);
+      return response.data;
+    } catch (e) {
+      throw Exception('Failed to score pronunciation: $e');
+    }
+  }
 }

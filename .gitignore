@@ -13,6 +13,7 @@ env/
 *.swo
 
 # Runtime data
+*.log
 audio_cache/
 logs/
 

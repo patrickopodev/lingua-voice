@@ -4,6 +4,7 @@ import '../models/message.dart';
 import '../models/correction.dart';
 import '../services/api_service.dart';
 import '../services/audio_service.dart';
+import 'pronunciation_score_card.dart';
 
 class MessageBubble extends StatefulWidget {
   final Message message;
@@ -106,6 +107,9 @@ class _MessageBubbleState extends State<MessageBubble> {
           if (!message.isUser && corr != null && corr.hasErrors) ...[
             const SizedBox(height: 4),
             _CorrectionCard(correction: corr),
+          ],
+          if (message.isUser && message.pronunciationScore != null) ...[
+            PronunciationScoreCard(result: message.pronunciationScore!),
           ],
           if (!message.isUser && message.xp != null) ...[
             const SizedBox(height: 2),

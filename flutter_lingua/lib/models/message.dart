@@ -1,4 +1,5 @@
 import 'correction.dart';
+import 'pronunciation_result.dart';
 import 'xp_result.dart';
 
 class Message {
@@ -8,6 +9,7 @@ class Message {
   final Correction? correction;
   final XpResult? xp;
   final String? audioUrl;
+  final PronunciationResult? pronunciationScore;
 
   Message({
     required this.text,
@@ -16,6 +18,7 @@ class Message {
     this.correction,
     this.xp,
     this.audioUrl,
+    this.pronunciationScore,
   }) : timestamp = timestamp ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {

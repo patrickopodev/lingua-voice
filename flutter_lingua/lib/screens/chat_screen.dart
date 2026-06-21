@@ -5,6 +5,7 @@ import '../models/message.dart';
 import '../models/correction.dart';
 import '../models/xp_result.dart';
 import '../models/lesson.dart';
+import '../models/pronunciation_result.dart';
 import '../services/api_service.dart';
 import '../services/audio_service.dart';
 import '../providers/language_provider.dart';
@@ -77,6 +78,7 @@ class _ChatScreenState extends State<ChatScreen> {
         xp: result['xp'] != null
             ? XpResult.fromJson(result['xp'])
             : null,
+        audioUrl: result['audio_url'],
       );
 
       setState(() => _messages.add(aiMsg));
@@ -85,7 +87,9 @@ class _ChatScreenState extends State<ChatScreen> {
         showXpNotification(context, aiMsg.xp!);
       }
 
-      await _speakResponse(responseText);
+      if (result['audio_url'] != null) {
+        await context.read<AudioService>().playAudioUrl('${api.baseUrl}${result['audio_url']}');
+      }
     } catch (e) {
       setState(() {
         _messages.add(Message(text: 'Error: $e', isUser: false));
@@ -107,7 +111,19 @@ class _ChatScreenState extends State<ChatScreen> {
         lessonId: widget.lesson?.id,
       );
 
-      final userMsg = Message(text: result['user_text'], isUser: true);
+      final userText = result['user_text'] as String? ?? '';
+      PronunciationResult? pronunciationScore;
+
+      try {
+        final scoreResult = await api.pronounce(audioFile, userText, _selectedLanguage);
+        pronunciationScore = PronunciationResult.fromJson(scoreResult);
+      } catch (_) {}
+
+      final userMsg = Message(
+        text: userText,
+        isUser: true,
+        pronunciationScore: pronunciationScore,
+      );
       final aiMsg = Message(
         text: result['response'],
         isUser: false,
