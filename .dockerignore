@@ -1,0 +1,31 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+env/
+
+# Docker
+.dockerignore
+Dockerfile
+
+# Runtime data — created on startup
+audio_cache/
+logs/
+
+# Frontend — not needed in API image
+flutter_lingua/
+node_modules/
+
+# Graphify — offline analysis output
+graphify-out/
+
+# Secrets
+.env
+.env.local

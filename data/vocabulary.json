@@ -1,0 +1,13 @@
+{
+  "test_user": [
+    {
+      "word": "hola",
+      "translation": "hello",
+      "language": "es",
+      "context": null,
+      "mastery_level": 1,
+      "last_reviewed": "2026-06-18",
+      "added_at": "2026-06-18T09:12:19.792799"
+    }
+  ]
+}

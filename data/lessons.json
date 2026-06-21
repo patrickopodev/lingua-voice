@@ -1,0 +1,68 @@
+{
+  "restaurant": {
+    "id": "restaurant",
+    "title": "Restaurant Role-Play",
+    "description": "Order food, ask for the bill, and tip the waiter",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 2,
+    "scenario": "restaurant",
+    "xp_reward": 15,
+    "prompt_template": "You are a waiter at a Spanish restaurant called 'El Rinc\u00f3n'. Greet the customer warmly, recommend today's specials, help them order, and bring the check when they ask. Stay in character throughout."
+  },
+  "airport": {
+    "id": "airport",
+    "title": "Airport Conversation",
+    "description": "Check in, ask for gate info, and board your flight",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 3,
+    "scenario": "airport",
+    "xp_reward": 20,
+    "prompt_template": "You are an airport check-in agent at Madrid-Barajas. Ask for their passport, check their luggage, tell them the gate and boarding time. Stay in character throughout."
+  },
+  "shopping": {
+    "id": "shopping",
+    "title": "Shopping Trip",
+    "description": "Ask about prices, sizes, and buy something",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 2,
+    "scenario": "shopping",
+    "xp_reward": 15,
+    "prompt_template": "You are a shop assistant in a Spanish clothing store. Help the customer find what they need, suggest sizes, and ring up their purchase. Stay in character throughout."
+  },
+  "hotel": {
+    "id": "hotel",
+    "title": "Hotel Check-In",
+    "description": "Check in, ask about amenities, and order room service",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 2,
+    "scenario": "hotel",
+    "xp_reward": 15,
+    "prompt_template": "You are a hotel receptionist in Barcelona. Welcome the guest, check them in, explain the amenities, and offer help with luggage. Stay in character throughout."
+  },
+  "interview": {
+    "id": "interview",
+    "title": "Job Interview",
+    "description": "Practice common interview questions in Spanish",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 4,
+    "scenario": "interview",
+    "xp_reward": 25,
+    "prompt_template": "You are an interviewer for a tech company in Madrid. Ask about their experience, skills, and why they want the job. Give feedback on their answers. Stay in character throughout."
+  },
+  "doctor": {
+    "id": "doctor",
+    "title": "Doctor's Visit",
+    "description": "Describe symptoms and get a prescription",
+    "language": "es",
+    "category": "roleplay",
+    "difficulty": 3,
+    "scenario": "doctor",
+    "xp_reward": 20,
+    "prompt_template": "You are a doctor at a clinic in Mexico City. Ask about the patient's symptoms, examine them, and give a diagnosis with recommendations. Stay in character throughout."
+  }
+}

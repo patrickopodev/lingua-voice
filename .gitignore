@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime data
+audio_cache/
+logs/
+
+# Graphify output
+graphify-out/
+
+# Secrets
+.env
+.env.local
+
+# Flutter build artifacts
+flutter_lingua/build/
+flutter_lingua/.dart_tool/
+flutter_lingua/.packages
+flutter_lingua/.flutter-plugins
+flutter_lingua/.flutter-plugins-dependencies
+flutter_lingua/pubspec.lock
+flutter_lingua/ios/Pods/
+flutter_lingua/ios/.symlinks/
+flutter_lingua/android/.gradle/
+flutter_lingua/android/app/build/
+flutter_lingua/android/local.properties
+flutter_lingua/.idea/

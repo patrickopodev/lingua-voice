@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lingua-api
+    runtime: image
+    repo: https://github.com/YOUR_USERNAME/lingua-voice  # replace with your repo URL
+    branch: main
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false  # set in Render dashboard (never committed)
+      - key: STT_PROVIDER
+        value: groq
+      - key: LLM_PROVIDER
+        value: groq
+      - key: TTS_PROVIDER
+        value: google
+    healthCheckPath: /health
