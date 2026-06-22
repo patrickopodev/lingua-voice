@@ -53,7 +53,7 @@ def get_llm() -> LLMProvider:
 
 
 def get_tts() -> TTSProvider:
-    kind = os.getenv("TTS_PROVIDER", "edge")
+    kind = os.getenv("TTS_PROVIDER", "google")
     inner: TTSProvider
     if kind == "edge":
         inner = EdgeTTS()
