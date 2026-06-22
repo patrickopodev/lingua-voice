@@ -5,6 +5,13 @@ class STTProvider(ABC):
     async def transcribe(self, audio_bytes: bytes, language: str) -> str:
         ...
 
+LANG_MAP = {
+    "english": "en", "spanish": "es", "french": "fr", "german": "de",
+    "italian": "it", "portuguese": "pt", "russian": "ru",
+    "japanese": "ja", "korean": "ko", "mandarin": "zh",
+    "arabic": "ar", "hindi": "hi", "hausa": "ha",
+}
+
 class GroqSTT(STTProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -12,10 +19,11 @@ class GroqSTT(STTProvider):
     async def transcribe(self, audio_bytes: bytes, language: str) -> str:
         from groq import AsyncGroq
         client = AsyncGroq(api_key=self.api_key)
+        lang_code = LANG_MAP.get(language.lower(), language[:2])
         transcription = await client.audio.transcriptions.create(
             file=("audio.webm", audio_bytes, "audio/webm"),
             model="whisper-large-v3",
-            language=language,
+            language=lang_code,
             response_format="json",
         )
         return transcription.text

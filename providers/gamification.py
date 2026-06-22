@@ -1,42 +1,49 @@
 import json
-from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-PROFILES_FILE = DATA_DIR / "profiles.json"
-VOCAB_FILE = DATA_DIR / "vocabulary.json"
-HISTORY_FILE = DATA_DIR / "conversations.json"
+from providers.database import get_conn, init_db, UserProfile, XPResult, Stats, VocabularyWord
 
-def _load_json(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text())
-    return {}
+init_db()
 
-def _save_json(path: Path, data: dict):
-    path.write_text(json.dumps(data, indent=2))
 
 def get_profile(user_id: str) -> dict:
-    profiles = _load_json(PROFILES_FILE)
-    if user_id not in profiles:
-        profiles[user_id] = {
-            "username": f"user_{user_id[:8]}",
-            "total_xp": 0,
-            "level": 1,
-            "streak_days": 0,
-            "last_active": str(date.today()),
-            "target_language": "es",
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        _save_json(PROFILES_FILE, profiles)
-    return profiles[user_id]
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if row:
+        conn.close()
+        return dict(row)
+    profile = UserProfile(
+        user_id=user_id,
+        username=f"user_{user_id[:8]}",
+        last_active=str(date.today()),
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    conn.execute(
+        """INSERT INTO users (user_id, username, total_xp, level, streak_days, last_active, target_language, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (profile.user_id, profile.username, profile.total_xp, profile.level,
+         profile.streak_days, profile.last_active, profile.target_language, profile.created_at),
+    )
+    conn.commit()
+    conn.close()
+    return profile.model_dump()
+
 
 def update_profile(user_id: str, updates: dict):
-    profiles = _load_json(PROFILES_FILE)
-    if user_id not in profiles:
-        profiles[user_id] = get_profile(user_id)
-    profiles[user_id].update(updates)
-    _save_json(PROFILES_FILE, profiles)
+    conn = get_conn()
+    existing = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not existing:
+        get_profile(user_id)
+    allowed = {"username", "total_xp", "level", "streak_days", "last_active", "target_language"}
+    set_clause = ", ".join(f"{k} = ?" for k in updates if k in allowed)
+    vals = [updates[k] for k in updates if k in allowed]
+    if set_clause:
+        conn.execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", (*vals, user_id))
+        conn.commit()
+    conn.close()
+
 
 def add_xp(user_id: str, xp: int) -> dict:
     profile = get_profile(user_id)
@@ -65,84 +72,117 @@ def add_xp(user_id: str, xp: int) -> dict:
         "streak_days": streak,
         "last_active": str(today),
     })
+    return XPResult(
+        xp_earned=xp,
+        total_xp=new_xp,
+        level=new_level,
+        leveled_up=new_level > old_level,
+        streak_days=streak,
+    ).model_dump()
 
-    return {
-        "xp_earned": xp,
-        "total_xp": new_xp,
-        "level": new_level,
-        "leveled_up": new_level > old_level,
-        "streak_days": streak,
-    }
 
 def get_stats(user_id: str) -> dict:
     profile = get_profile(user_id)
-    vocab = _load_json(VOCAB_FILE)
-    user_vocab = [v for v in vocab.get(user_id, [])]
-    history = _load_json(HISTORY_FILE)
-    user_history = [h for h in history.get(user_id, [])]
-    return {
-        "username": profile["username"],
-        "total_xp": profile["total_xp"],
-        "level": profile["level"],
-        "streak_days": profile["streak_days"],
-        "vocabulary_count": len(user_vocab),
-        "conversations_count": len(user_history),
-        "target_language": profile.get("target_language", "es"),
-    }
+    conn = get_conn()
+    vocab_count = conn.execute(
+        "SELECT COUNT(*) FROM vocabulary WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    conv_count = conn.execute(
+        "SELECT COUNT(*) FROM conversations WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    conn.close()
+    return Stats(
+        username=profile["username"],
+        total_xp=profile["total_xp"],
+        level=profile["level"],
+        streak_days=profile["streak_days"],
+        vocabulary_count=vocab_count,
+        conversations_count=conv_count,
+        target_language=profile.get("target_language", "es"),
+    ).model_dump()
+
 
 def add_vocabulary(user_id: str, word: str, translation: str, language: str, context: str = None) -> dict:
-    vocab = _load_json(VOCAB_FILE)
-    if user_id not in vocab:
-        vocab[user_id] = []
-    existing = next((v for v in vocab[user_id] if v["word"] == word), None)
+    get_profile(user_id)
+    conn = get_conn()
+    existing = conn.execute(
+        "SELECT * FROM vocabulary WHERE user_id = ? AND word = ?", (user_id, word)
+    ).fetchone()
     if existing:
-        existing["mastery_level"] = min(existing.get("mastery_level", 0) + 1, 5)
-        existing["last_reviewed"] = str(date.today())
-        existing["context"] = context or existing.get("context")
-    else:
-        vocab[user_id].append({
-            "word": word,
-            "translation": translation,
-            "language": language,
-            "context": context,
-            "mastery_level": 1,
-            "last_reviewed": str(date.today()),
-            "added_at": datetime.utcnow().isoformat(),
-        })
-    _save_json(VOCAB_FILE, vocab)
-    return {"word": word, "mastery_level": existing["mastery_level"] if existing else 1}
+        new_level = min(existing["mastery_level"] + 1, 5)
+        conn.execute(
+            "UPDATE vocabulary SET mastery_level = ?, last_reviewed = ?, context = COALESCE(?, context) WHERE id = ?",
+            (new_level, str(date.today()), context, existing["id"]),
+        )
+        conn.commit()
+        conn.close()
+        return {"word": word, "mastery_level": new_level}
+    conn.execute(
+        """INSERT INTO vocabulary (user_id, word, translation, language, context, mastery_level, last_reviewed, added_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+        (user_id, word, translation, language, context, str(date.today()), datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return {"word": word, "mastery_level": 1}
+
 
 def get_vocabulary(user_id: str, language: str = None) -> list:
-    vocab = _load_json(VOCAB_FILE)
-    items = vocab.get(user_id, [])
+    conn = get_conn()
     if language:
-        items = [v for v in items if v.get("language") == language]
-    return sorted(items, key=lambda v: v.get("last_reviewed", ""), reverse=True)
+        rows = conn.execute(
+            "SELECT * FROM vocabulary WHERE user_id = ? AND language = ? ORDER BY last_reviewed DESC",
+            (user_id, language),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM vocabulary WHERE user_id = ? ORDER BY last_reviewed DESC", (user_id,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 def save_conversation(user_id: str, data: dict):
-    history = _load_json(HISTORY_FILE)
-    if user_id not in history:
-        history[user_id] = []
-    history[user_id].append({
-        **data,
-        "timestamp": datetime.utcnow().isoformat(),
-    })
-    if len(history[user_id]) > 500:
-        history[user_id] = history[user_id][-500:]
-    _save_json(HISTORY_FILE, history)
+    get_profile(user_id)
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO conversations (user_id, data, timestamp) VALUES (?, ?, ?)",
+        (user_id, json.dumps(data), datetime.now(timezone.utc).isoformat()),
+    )
+    conn.execute(
+        """DELETE FROM conversations WHERE id IN (
+               SELECT id FROM conversations WHERE user_id = ? ORDER BY timestamp ASC
+               LIMIT MAX(0, (SELECT COUNT(*) FROM conversations WHERE user_id = ?) - 500)
+           )""",
+        (user_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
 
 def get_conversation_history(user_id: str, limit: int = 50) -> list:
-    history = _load_json(HISTORY_FILE)
-    items = history.get(user_id, [])
-    return items[-limit:]
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in reversed(rows):
+        d = dict(r)
+        try:
+            data = json.loads(d["data"])
+        except (json.JSONDecodeError, TypeError):
+            data = d["data"]
+        result.append({**data, "timestamp": d["timestamp"]})
+    return result
+
 
 def delete_user(user_id: str):
-    profiles = _load_json(PROFILES_FILE)
-    profiles.pop(user_id, None)
-    _save_json(PROFILES_FILE, profiles)
-    vocab = _load_json(VOCAB_FILE)
-    vocab.pop(user_id, None)
-    _save_json(VOCAB_FILE, vocab)
-    history = _load_json(HISTORY_FILE)
-    history.pop(user_id, None)
-    _save_json(HISTORY_FILE, history)
+    conn = get_conn()
+    conn.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM vocabulary WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM lesson_progress WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()

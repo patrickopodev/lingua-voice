@@ -85,6 +85,9 @@ class ApiService {
       }
       final response = await _dio.post('/conversation', data: formData);
       return response.data;
+    } on DioException catch (e) {
+      final detail = e.response?.data is Map ? (e.response!.data as Map)['detail'] ?? e.message : e.message;
+      throw Exception('Conversation error (${e.response?.statusCode}): $detail');
     } catch (e) {
       throw Exception('Failed conversation: $e');
     }
@@ -95,10 +98,11 @@ class ApiService {
     required String targetLanguage,
   }) async {
     try {
-      final response = await _dio.post('/translate_and_speak', data: {
+      final formData = FormData.fromMap({
         'text': text,
         'target_language': targetLanguage,
       });
+      final response = await _dio.post('/translate_and_speak', data: formData);
       return response.data;
     } catch (e) {
       throw Exception('Failed to translate: $e');

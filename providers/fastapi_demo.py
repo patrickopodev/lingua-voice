@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 import httpx
 
-from providers import get_stt, get_llm, get_tts
+from providers import get_stt, get_llm, get_tts, validate_providers
 from providers.llm import parse_llm_response
 from providers.gamification import (
     add_xp, get_profile, get_stats, add_vocabulary,
@@ -25,6 +25,31 @@ tts = get_tts()
 
 AUDIO_CACHE = Path("audio_cache")
 AUDIO_CACHE.mkdir(exist_ok=True)
+
+@router.get("/debug/health")
+async def debug_health():
+    import sys, importlib
+    results = {}
+    try:
+        from groq import AsyncGroq
+        results["groq_sdk"] = "ok"
+    except Exception as e:
+        results["groq_sdk"] = f"FAIL: {e}"
+    results["groq_api_key_set"] = bool(os.getenv("GROQ_API_KEY", ""))
+    results["python"] = sys.version
+    try:
+        conn = __import__("providers.database", fromlist=["get_conn"]).get_conn()
+        conn.execute("SELECT 1")
+        conn.close()
+        results["database"] = "ok"
+    except Exception as e:
+        results["database"] = f"FAIL: {e}"
+    try:
+        from gtts import gTTS
+        results["gtts"] = "ok"
+    except Exception as e:
+        results["gtts"] = f"FAIL: {e}"
+    return results
 
 class ChatRequest(BaseModel):
     text: str
@@ -105,31 +130,30 @@ async def pronounce(
 
 # ── Transcribe ──────────────────────────────────────────
 
-class TranslateRequest(BaseModel):
-    text: str
-    target_language: str = "en"
-
 @router.post("/translate_and_speak")
-async def translate_and_speak(req: TranslateRequest):
+async def translate_and_speak(
+    text: str = Form(...),
+    target_language: str = Form("en"),
+):
     try:
         translation_prompt = (
-            f"Translate the following text to {req.target_language}. "
-            f"Return only the translation, no other text.\n\n{req.text}"
+            f"Translate the following text to {target_language}. "
+            f"Return only the translation, no other text.\n\n{text}"
         )
         translated_text = await llm.generate(
             translation_prompt,
-            req.target_language,
+            target_language,
             [{"role": "system", "content": "You are a translator. Return only the translation."}],
         )
         translated_text = translated_text.strip().strip('"\'')
-        audio_data = await tts.speak(translated_text, req.target_language)
+        audio_data = await tts.speak(translated_text, target_language)
         filename = f"{uuid.uuid4().hex}.mp3"
         filepath = AUDIO_CACHE / filename
         filepath.write_bytes(audio_data)
         return {
             "translated_text": translated_text,
             "audio_url": f"/audio/{filename}",
-            "target_language": req.target_language,
+            "target_language": target_language,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -143,39 +167,42 @@ async def transcribe(audio: UploadFile = File(...), language: str = Form("spanis
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    raw_response = await llm.generate(req.text, req.language, req.history)
-    parsed = parse_llm_response(raw_response)
-    response_text = parsed["response_text"]
-    correction = parsed["correction"]
+    try:
+        raw_response = await llm.generate(req.text, req.language, req.history)
+        parsed = parse_llm_response(raw_response)
+        response_text = parsed["response_text"]
+        correction = parsed["correction"]
 
-    audio_data = await tts.speak(response_text, req.language)
-    filename = f"{uuid.uuid4().hex}.mp3"
-    filepath = AUDIO_CACHE / filename
-    filepath.write_bytes(audio_data)
+        audio_data = await tts.speak(response_text, req.language)
+        filename = f"{uuid.uuid4().hex}.mp3"
+        filepath = AUDIO_CACHE / filename
+        filepath.write_bytes(audio_data)
 
-    result = {
-        "response": response_text,
-        "correction": correction,
-        "audio_url": f"/audio/{filename}",
-    }
-
-    if req.user_id:
-        xp_result = add_xp(req.user_id, 5)
-        result["xp"] = xp_result
-
-        if correction.get("vocab"):
-            for v in correction["vocab"][:5]:
-                add_vocabulary(req.user_id, v["word"], v.get("translation", ""), req.language)
-
-        conversation_data = {
-            "user_text": req.text,
+        result = {
             "response": response_text,
+            "correction": correction,
             "audio_url": f"/audio/{filename}",
-            "language": req.language,
         }
-        save_conversation(req.user_id, conversation_data)
 
-    return result
+        if req.user_id:
+            xp_result = add_xp(req.user_id, 5)
+            result["xp"] = xp_result
+
+            if correction.get("vocab"):
+                for v in correction["vocab"][:5]:
+                    add_vocabulary(req.user_id, v["word"], v.get("translation", ""), req.language)
+
+            conversation_data = {
+                "user_text": req.text,
+                "response": response_text,
+                "audio_url": f"/audio/{filename}",
+                "language": req.language,
+            }
+            save_conversation(req.user_id, conversation_data)
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat error: {type(e).__name__}: {e}")
 
 # ── Speak ───────────────────────────────────────────────
 

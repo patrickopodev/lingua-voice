@@ -5,6 +5,16 @@ from .tts import TTSProvider, EdgeTTS, GoogleTTS, SelfHostedTTS
 from .cache import get_cached_audio, set_cached_audio
 
 
+def validate_providers():
+    kind_llm = os.getenv("LLM_PROVIDER", "groq")
+    kind_stt = os.getenv("STT_PROVIDER", "groq")
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if (kind_llm == "groq" or kind_stt == "groq") and not groq_key:
+        raise RuntimeError(
+            "GROQ_API_KEY is required when LLM_PROVIDER or STT_PROVIDER is 'groq'. "
+            "Set it in your .env file or Render dashboard."
+        )
+
 class CachedTTS(TTSProvider):
     def __init__(self, inner: TTSProvider):
         self._inner = inner

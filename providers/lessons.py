@@ -1,9 +1,6 @@
-import json
-from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
-LESSONS_FILE = Path("data") / "lessons.json"
-PROGRESS_FILE = Path("data") / "lesson_progress.json"
+from providers.database import get_conn, init_db, Lesson, ActiveLesson, CompletionResult
 
 SEED_LESSONS = [
     {
@@ -101,68 +98,104 @@ SEED_LESSONS = [
     },
 ]
 
-def _load_json(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text())
-    return {}
+init_db()
 
-def _save_json(path: Path, data: dict):
-    path.write_text(json.dumps(data, indent=2))
 
 def seed_lessons():
-    Path("data").mkdir(exist_ok=True)
-    lessons = _load_json(LESSONS_FILE)
-    if lessons:
-        return {"message": f"{len(lessons)} lessons already seeded"}
-    _save_json(LESSONS_FILE, {l["id"]: l for l in SEED_LESSONS})
+    conn = get_conn()
+    existing = conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0]
+    if existing > 0:
+        conn.close()
+        return {"message": f"{existing} lessons already seeded"}
+    for lesson in SEED_LESSONS:
+        conn.execute(
+            """INSERT INTO lessons (id, title, description, language, category, difficulty, scenario, xp_reward, prompt_template)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (lesson["id"], lesson["title"], lesson["description"],
+             lesson["language"], lesson["category"], lesson["difficulty"],
+             lesson["scenario"], lesson["xp_reward"], lesson["prompt_template"]),
+        )
+    conn.commit()
+    conn.close()
     return {"message": f"{len(SEED_LESSONS)} lessons seeded"}
 
+
 def get_lessons(language: str = None, category: str = None) -> list:
-    lessons = _load_json(LESSONS_FILE)
-    items = list(lessons.values())
+    conn = get_conn()
+    clauses = []
+    params = []
     if language:
-        items = [l for l in items if l["language"] == language]
+        clauses.append("language = ?")
+        params.append(language)
     if category:
-        items = [l for l in items if l["category"] == category]
-    return items
+        clauses.append("category = ?")
+        params.append(category)
+    where = " AND ".join(clauses) if clauses else "1=1"
+    rows = conn.execute(f"SELECT * FROM lessons WHERE {where}", params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 def get_lesson(lesson_id: str) -> dict | None:
-    lessons = _load_json(LESSONS_FILE)
-    return lessons.get(lesson_id)
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM lessons WHERE id = ?", (lesson_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
 
 def start_lesson(user_id: str, lesson_id: str) -> dict | None:
     lesson = get_lesson(lesson_id)
     if not lesson:
         return None
-    return {
-        "lesson_id": lesson["id"],
-        "title": lesson["title"],
-        "description": lesson["description"],
-        "scenario": lesson["scenario"],
-        "system_prompt": lesson["prompt_template"],
-        "xp_reward": lesson["xp_reward"],
-    }
+    return ActiveLesson(
+        lesson_id=lesson["id"],
+        title=lesson["title"],
+        description=lesson["description"],
+        scenario=lesson["scenario"],
+        system_prompt=lesson["prompt_template"],
+        xp_reward=lesson["xp_reward"],
+    ).model_dump()
+
 
 def complete_lesson(user_id: str, lesson_id: str, score: int = 0) -> dict:
-    Path("data").mkdir(exist_ok=True)
-    progress = _load_json(PROGRESS_FILE)
-    if user_id not in progress:
-        progress[user_id] = {}
-    prev = progress[user_id].get(lesson_id, {})
-    if prev.get("completed"):
+    from providers.gamification import get_profile
+    get_profile(user_id)
+    conn = get_conn()
+    existing = conn.execute(
+        "SELECT * FROM lesson_progress WHERE user_id = ? AND lesson_id = ?",
+        (user_id, lesson_id),
+    ).fetchone()
+    if existing and existing["completed"]:
+        conn.close()
         return {"message": "already completed", "xp_earned": 0}
     lesson = get_lesson(lesson_id)
     xp_base = lesson["xp_reward"] if lesson else 10
     xp_bonus = 5 if score > 80 else 0
-    progress[user_id][lesson_id] = {
-        "completed": True,
-        "score": score,
-        "completed_at": datetime.utcnow().isoformat(),
-        "attempts": prev.get("attempts", 0) + 1,
-    }
-    _save_json(PROGRESS_FILE, progress)
+    if existing:
+        conn.execute(
+            "UPDATE lesson_progress SET completed = 1, score = ?, completed_at = ?, attempts = attempts + 1 WHERE id = ?",
+            (score, datetime.now(timezone.utc).isoformat(), existing["id"]),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO lesson_progress (user_id, lesson_id, completed, score, completed_at, attempts)
+               VALUES (?, ?, 1, ?, ?, 1)""",
+            (user_id, lesson_id, score, datetime.now(timezone.utc).isoformat()),
+        )
+    conn.commit()
+    conn.close()
     return {"xp_earned": xp_base + xp_bonus}
 
+
 def get_progress(user_id: str) -> dict:
-    progress = _load_json(PROGRESS_FILE)
-    return progress.get(user_id, {})
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM lesson_progress WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    conn.close()
+    return {r["lesson_id"]: {
+        "completed": bool(r["completed"]),
+        "score": r["score"],
+        "completed_at": r["completed_at"],
+        "attempts": r["attempts"],
+    } for r in rows}
